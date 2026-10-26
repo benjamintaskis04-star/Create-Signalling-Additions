@@ -137,3 +137,11 @@ def alpha1aChecks = tasks.register('alpha1aChecks', JavaExec) {
     javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
 }
 tasks.named('check') { dependsOn alpha1aChecks }
+
+def alpha1bChecks = tasks.register('alpha1bChecks', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.benjamintaskis.createsignalextensions.Alpha1bChecks'
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+}
+tasks.named('check') { dependsOn alpha1bChecks }

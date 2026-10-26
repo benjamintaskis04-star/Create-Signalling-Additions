@@ -10,8 +10,8 @@ set "GRADLE_URL=https://services.gradle.org/distributions/gradle-%GRADLE_VERSION
 set "ORIGINAL_DIR=%CD%"
 
 echo ===============================================
-echo  Create: Signalling Additions 1.5.0 Alpha 1a development build
-echo  Internal mod version: 1.5.0-alpha.1a
+echo  Create: Signalling Additions 1.5.0 Alpha 1b development build
+echo  Internal mod version: 1.5.0-alpha.1b
 echo  Minecraft 1.21.1 / NeoForge 21.1.243
 echo  Create 6.0.10 / Gradle %GRADLE_VERSION%
 echo ===============================================
@@ -75,7 +75,7 @@ echo.
 
 rem Build from a short local temporary path. Java/Gradle cannot reliably read
 rem OneDrive placeholder files directly, even when PowerShell can read them.
-set "CSA_BUILD_DIR=%TEMP%\CSA-Alpha1a-%RANDOM%-%RANDOM%"
+set "CSA_BUILD_DIR=%TEMP%\CSA-Alpha1b-%RANDOM%-%RANDOM%"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop'; New-Item -ItemType Directory -Path $env:CSA_BUILD_DIR -Force | Out-Null; Copy-Item -LiteralPath 'src','build-support','build.gradle','settings.gradle','gradle.properties' -Destination $env:CSA_BUILD_DIR -Recurse -Force"
 if errorlevel 1 exit /b 1
