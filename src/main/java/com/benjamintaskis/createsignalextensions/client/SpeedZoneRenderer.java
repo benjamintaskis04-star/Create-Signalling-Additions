@@ -96,13 +96,14 @@ public final class SpeedZoneRenderer {
             boolean showAll = ClientConfig.showAllSpeedZones(), animate = ClientConfig.speedZonePulse();
             float opacity = ClientConfig.speedZoneOpacity();
             double pulseSpeed = ClientConfig.speedZonePulseSpeed();
+            var runningSide = ClientConfig.speedHighlightRunningSide();
             for (var entry : faces.entrySet()) {
                 var surface = entry.getKey();
                 if (surface.centre().distanceToSqr(camera) > range * range
                         || !mc.level.hasChunkAt(BlockPos.containing(surface.centre()))) continue;
                 Paint[] pair = entry.getValue();
                 Paint paint = pair[0] == null ? pair[1] : pair[1] == null ? pair[0]
-                        : pair[entry.getKey().side() >= 0 ? 0 : 1];
+                        : pair[runningSide.directionIndex(surface.side())];
                 // An inspected ordinary zone also shows its branch-specific X overlay.
                 if (!showAll && !inspected(selected, surface)) continue;
                 int base = SpeedZoneColour.rgb(paint.zone().speed());

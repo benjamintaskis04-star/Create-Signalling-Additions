@@ -126,7 +126,7 @@ tasks.named('classes') {
 tasks.named('jar') {
     dependsOn safeProcessResources
     // Keep the corrective test artifact distinct while retaining the internal Alpha 1b version.
-    archiveClassifier = 'issue3-turnout-fix-test'
+    archiveClassifier = 'issues2-3-running-side-turnout-test'
 }
 
 // Small deterministic regression checks run without starting Minecraft.
@@ -155,3 +155,11 @@ def turnoutVisualChecks = tasks.register('turnoutVisualChecks', JavaExec) {
     javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
 }
 tasks.named('check') { dependsOn turnoutVisualChecks }
+
+def runningSideChecks = tasks.register('runningSideChecks', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.benjamintaskis.createsignalextensions.RunningSideChecks'
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+}
+tasks.named('check') { dependsOn runningSideChecks }

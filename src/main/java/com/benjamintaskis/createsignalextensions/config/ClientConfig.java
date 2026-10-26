@@ -10,6 +10,7 @@ public final class ClientConfig {
     public static final ModConfigSpec.DoubleValue SPEED_ZONE_OPACITY;
     public static final ModConfigSpec.BooleanValue SPEED_ZONE_PULSE;
     public static final ModConfigSpec.DoubleValue SPEED_ZONE_PULSE_SPEED;
+    public static final ModConfigSpec.EnumValue<SpeedHighlightRunningSide> SPEED_HIGHLIGHT_RUNNING_SIDE;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -21,6 +22,8 @@ public final class ClientConfig {
         b.pop();
         b.pop();
         b.push("speed_zone_visualisation");
+        SPEED_HIGHLIGHT_RUNNING_SIDE = b.comment("Sleeper half used for each travel direction when opposite restrictions overlap. LEFT/RIGHT is relative to travel, not the camera. Applies immediately after client config reload.")
+                .defineEnum("speed_highlight_running_side", SpeedHighlightRunningSide.LEFT);
         SHOW_ALL_SPEED_ZONES = b.comment("Show configured speed zones in range. Crosshair inspection remains enabled independently.")
                 .define("show_all_speed_zones", false);
         SPEED_ZONE_RENDER_DISTANCE = b.comment("Maximum speed-zone overlay distance in blocks (also capped by loaded chunks).")
@@ -41,5 +44,6 @@ public final class ClientConfig {
     public static float speedZoneOpacity() { return SPEED_ZONE_OPACITY.get().floatValue(); }
     public static boolean speedZonePulse() { return SPEED_ZONE_PULSE.get(); }
     public static double speedZonePulseSpeed() { return SPEED_ZONE_PULSE_SPEED.get(); }
+    public static SpeedHighlightRunningSide speedHighlightRunningSide() { return SPEED_HIGHLIGHT_RUNNING_SIDE.get(); }
     public static double minimumGuiScale() { return MINIMUM_GUI_SCALE_PERCENT.get() / 100.0; }
 }
