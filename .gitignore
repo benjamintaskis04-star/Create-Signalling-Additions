@@ -12,6 +12,7 @@ out/
 
 # Logs
 *.log
+logs/
 crash-reports/
 
 # Windows

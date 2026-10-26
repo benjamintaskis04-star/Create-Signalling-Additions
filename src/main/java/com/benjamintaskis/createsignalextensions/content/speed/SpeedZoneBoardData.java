@@ -17,9 +17,12 @@ import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.phys.Vec3;
 import java.util.*;
 
-/** Visual board index. Unloading a sign never deletes its graph boundary. */
+/** Visual-only board index, including X-board branch instructions. Never used for enforcement. */
 public final class SpeedZoneBoardData extends SavedData {
-    public record Board(BlockPos sign, Vec3 from, Vec3 to, double fraction, int speed) {
+    public record Board(BlockPos sign, Vec3 from, Vec3 to, double fraction, int speed, boolean turnout) {
+        public Board(BlockPos sign, Vec3 from, Vec3 to, double fraction, int speed) {
+            this(sign, from, to, fraction, speed, false);
+        }
         public boolean valid() {
             return finite(from) && finite(to) && from.distanceToSqr(to) > 1.0e-8
                     && Double.isFinite(fraction) && fraction >= 0 && fraction <= 1
@@ -44,7 +47,7 @@ public final class SpeedZoneBoardData extends SavedData {
 
     public void update(SpeedBoardBlockEntity board) {
         if (!(board.getLevel() instanceof ServerLevel level)) return;
-        if (!board.hasTrackTarget() || board.isTurnoutBoard()) { remove(board.getBlockPos()); return; }
+        if (!board.hasTrackTarget()) { remove(board.getBlockPos()); return; }
         Link link = new Link(board.getTargetTrack(), board.getTargetDirection(), board.getBezierTarget(),
                 board.getBlockState(), board.getDefaultSpeedKmh(), board.isTurnoutBoard(), graphRevision);
         if (link.equals(resolved.get(board.getBlockPos()))) return;
@@ -82,7 +85,7 @@ public final class SpeedZoneBoardData extends SavedData {
         Vec3 a = from.getLocation().getLocation(), b = to.getLocation().getLocation();
         if (dot > 0) { Vec3 swap = a; a = b; b = swap; fraction = 1 - fraction; }
         Board next = new Board(board.getBlockPos().immutable(), a, b, fraction,
-                board.isUnrestricted() ? 0 : board.getDefaultSpeedKmh());
+                board.isUnrestricted() ? 0 : board.getDefaultSpeedKmh(), board.isTurnoutBoard() && !board.isUnrestricted());
         if (next.valid()) {
             if (!next.equals(boards.put(next.sign(), next))) setDirty();
             resolved.put(next.sign(), link);
@@ -125,7 +128,7 @@ public final class SpeedZoneBoardData extends SavedData {
             Board board = new Board(BlockPos.of(b.getLong("Sign")),
                     new Vec3(b.getDouble("Ax"), b.getDouble("Ay"), b.getDouble("Az")),
                     new Vec3(b.getDouble("Bx"), b.getDouble("By"), b.getDouble("Bz")),
-                    b.getDouble("Fraction"), b.getInt("Speed"));
+                    b.getDouble("Fraction"), b.getInt("Speed"), b.getBoolean("Turnout"));
             if (board.valid()) data.boards.put(board.sign(), board);
         }
         return data;
@@ -138,6 +141,7 @@ public final class SpeedZoneBoardData extends SavedData {
             b.putDouble("Ax", board.from().x); b.putDouble("Ay", board.from().y); b.putDouble("Az", board.from().z);
             b.putDouble("Bx", board.to().x); b.putDouble("By", board.to().y); b.putDouble("Bz", board.to().z);
             b.putDouble("Fraction", board.fraction()); b.putInt("Speed", board.speed()); list.add(b);
+            b.putBoolean("Turnout", board.turnout());
         }
         tag.put("Boards", list); return tag;
     }

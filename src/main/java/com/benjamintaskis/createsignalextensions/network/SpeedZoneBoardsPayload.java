@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public record SpeedZoneBoardsPayload(ResourceLocation dimension, List<Board> boards) implements CustomPacketPayload {
-    public static final Type<SpeedZoneBoardsPayload> TYPE = new Type<>(CreateSignallingAdditions.id("speed_zone_boards"));
+    public static final Type<SpeedZoneBoardsPayload> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(CreateSignallingAdditions.ID, "speed_zone_boards"));
     public static final StreamCodec<RegistryFriendlyByteBuf, SpeedZoneBoardsPayload> STREAM_CODEC =
             StreamCodec.ofMember(SpeedZoneBoardsPayload::encode, SpeedZoneBoardsPayload::decode);
     public SpeedZoneBoardsPayload { boards = List.copyOf(boards); }
@@ -22,7 +22,7 @@ public record SpeedZoneBoardsPayload(ResourceLocation dimension, List<Board> boa
         if (size < 0 || size > 4096) throw new IllegalArgumentException("Invalid speed board count");
         List<Board> boards = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
-            Board board = new Board(b.readBlockPos(), vector(b), vector(b), b.readDouble(), b.readVarInt());
+            Board board = new Board(b.readBlockPos(), vector(b), vector(b), b.readDouble(), b.readVarInt(), b.readBoolean());
             if (board.valid()) boards.add(board);
         }
         return new SpeedZoneBoardsPayload(dimension, boards);
@@ -33,7 +33,7 @@ public record SpeedZoneBoardsPayload(ResourceLocation dimension, List<Board> boa
             b.writeBlockPos(board.sign());
             b.writeDouble(board.from().x); b.writeDouble(board.from().y); b.writeDouble(board.from().z);
             b.writeDouble(board.to().x); b.writeDouble(board.to().y); b.writeDouble(board.to().z);
-            b.writeDouble(board.fraction()); b.writeVarInt(board.speed());
+            b.writeDouble(board.fraction()); b.writeVarInt(board.speed()); b.writeBoolean(board.turnout());
         }
     }
     @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }

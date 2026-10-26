@@ -22,10 +22,11 @@ public final class ModNetworking {
 
     public static void register(RegisterPayloadHandlersEvent event) {
         PayloadRegistrar registrar = event.registrar("1");
+        // Only the visual board payload uses v2 (added turnout flag). Operational payloads stay at v1.
         if (FMLEnvironment.dist == Dist.CLIENT) {
             registerClientPayloads(registrar);
         } else {
-            registrar.playToClient(SpeedZoneBoardsPayload.TYPE, SpeedZoneBoardsPayload.STREAM_CODEC, (payload, context) -> {});
+            registrar.versioned("2").playToClient(SpeedZoneBoardsPayload.TYPE, SpeedZoneBoardsPayload.STREAM_CODEC, (payload, context) -> {});
             // The payload types still need to be known to a dedicated server, but their
             // GUI handlers must never load client-only Minecraft classes there.
             registrar.playToClient(OpenRouteConfigPayload.TYPE, OpenRouteConfigPayload.STREAM_CODEC,
@@ -67,7 +68,7 @@ public final class ModNetworking {
     }
 
     private static void registerClientPayloads(PayloadRegistrar registrar) {
-        registrar.playToClient(SpeedZoneBoardsPayload.TYPE, SpeedZoneBoardsPayload.STREAM_CODEC,
+        registrar.versioned("2").playToClient(SpeedZoneBoardsPayload.TYPE, SpeedZoneBoardsPayload.STREAM_CODEC,
                 (payload, context) -> context.enqueueWork(() -> com.benjamintaskis.createsignalextensions.client.SpeedZoneRenderer.accept(payload)));
         registrar.playToClient(OpenRouteConfigPayload.TYPE, OpenRouteConfigPayload.STREAM_CODEC,
                 com.benjamintaskis.createsignalextensions.client.ClientPayloadHandlers::handleOpenRouteConfig);

@@ -45,8 +45,13 @@ public final class SpeedZoneRenderer {
     }
     private record Mapped(Board board, EdgeKey edge) {}
     private record Piece(SpeedZoneSleeperMesh.Surface surface, double distance, boolean forward) {}
-    private record Zone(int speed, List<Piece> pieces) {}
-    private record Walk(EdgeKey edge, double fraction, double distance, Set<EdgeKey> visited) {}
+    private record Zone(int speed, List<Piece> pieces, Set<SpeedZoneSleeperMesh.Surface> surfaces) {
+        Zone(int speed, List<Piece> pieces) {
+            this(speed, pieces, Collections.newSetFromMap(new IdentityHashMap<>()));
+            for (Piece piece : pieces) surfaces.add(piece.surface());
+        }
+    }
+    private record Walk(EdgeKey edge, double fraction, double distance, Set<EdgeKey> visited, boolean waitingForTurnout) {}
     private record Paint(Zone zone, Piece piece) {}
 
     public static void accept(SpeedZoneBoardsPayload payload) {
@@ -98,7 +103,8 @@ public final class SpeedZoneRenderer {
                 Paint[] pair = entry.getValue();
                 Paint paint = pair[0] == null ? pair[1] : pair[1] == null ? pair[0]
                         : pair[entry.getKey().side() >= 0 ? 0 : 1];
-                if (!showAll && !selected.contains(paint.zone())) continue;
+                // An inspected ordinary zone also shows its branch-specific X overlay.
+                if (!showAll && !inspected(selected, surface)) continue;
                 int base = SpeedZoneColour.rgb(paint.zone().speed());
                 double pulse = animate ? SpeedZonePulse.strength(paint.piece().distance(), seconds, pulseSpeed) : 0;
                 int rgb = SpeedZonePulse.colour(base, pulse);
@@ -114,6 +120,11 @@ public final class SpeedZoneRenderer {
         } finally { pose.popPose(); }
     }
 
+    private static boolean inspected(Set<Zone> selected, SpeedZoneSleeperMesh.Surface surface) {
+        for (Zone zone : selected) if (zone.surfaces().contains(surface)) return true;
+        return false;
+    }
+
     private static void rebuild(ClientLevel level, Vec3 camera, int range) {
         zones.clear();
         faces.clear();
@@ -126,7 +137,9 @@ public final class SpeedZoneRenderer {
                 TrackNode from = graph.locateNode(a), to = graph.locateNode(b);
                 if (from == null || to == null || graph.getConnectionsFrom(from).get(to) == null) continue;
                 EdgeKey key = new EdgeKey(graph, from, to);
-                byEdge.computeIfAbsent(key, $ -> new ArrayList<>()).add(board);
+                // X boards arm a branch-only overlay, never an ordinary zone boundary.
+                if (board.turnout()) starts.add(new Mapped(board, key));
+                else byEdge.computeIfAbsent(key, $ -> new ArrayList<>()).add(board);
                 break;
             }
         }
@@ -152,7 +165,7 @@ public final class SpeedZoneRenderer {
             if (start.board().speed() == 0 || totalFaces >= 65536) continue;
             List<Piece> pieces = new ArrayList<>();
             ArrayDeque<Walk> pending = new ArrayDeque<>();
-            pending.add(new Walk(start.edge(), start.board().fraction(), 0, Set.of()));
+            pending.add(new Walk(start.edge(), start.board().fraction(), 0, Set.of(), start.board().turnout()));
             Set<EdgeKey> expanded = new HashSet<>();
             for (int count = 0; count < 256 && !pending.isEmpty() && totalFaces < 65536; count++) {
                 if (++walkedEdges > 4096) break;
@@ -174,7 +187,7 @@ public final class SpeedZoneRenderer {
                 EdgeKey canonical = key.canonical();
                 TrackEdge physical = canonical.graph().getConnectionsFrom(canonical.from()).get(canonical.to());
                 boolean forward = canonical.equals(key);
-                if (physical != null) {
+                if (physical != null && !walk.waitingForTurnout()) {
                     var mesh = meshes.get(canonical);
                     if (mesh == null) {
                         mesh = SpeedZoneSleeperMesh.build(level, canonical.graph(), physical, camera, range, 32768 - cachedFaces);
@@ -191,11 +204,19 @@ public final class SpeedZoneRenderer {
                 if (boundary || endFraction < 1 - 1.0e-6) continue;
                 Set<EdgeKey> visited = new HashSet<>(walk.visited());
                 visited.add(key);
-                for (var exit : key.graph().getConnectionsFrom(key.to()).entrySet()) {
-                    if (exit.getKey() == key.from() || !edge.canTravelTo(exit.getValue())) continue;
+                var exits = key.graph().getConnectionsFrom(key.to()).entrySet().stream()
+                        .filter(exit -> exit.getKey() != key.from() && edge.canTravelTo(exit.getValue()))
+                        .toList();
+                int straight = walk.waitingForTurnout() && exits.size() > 1
+                        ? TurnoutVisualRoutes.straightIndex(edge.getDirection(false), key.to().getNormal(),
+                                exits.stream().map(exit -> exit.getValue().getDirection(true)).toList()) : -1;
+                for (int i = 0; i < exits.size(); i++) {
+                    if (!TurnoutVisualRoutes.follows(walk.waitingForTurnout(), straight, i, exits.size())) continue;
+                    var exit = exits.get(i);
                     EdgeKey next = new EdgeKey(key.graph(), key.to(), exit.getKey());
                     if (byEdge.getOrDefault(next, List.of()).stream().anyMatch(bd -> bd.fraction() < 1.0e-6)) continue;
-                    pending.addLast(new Walk(next, 0, walk.distance() + length, visited));
+                    pending.addLast(new Walk(next, 0, walk.distance() + length, visited,
+                            walk.waitingForTurnout() && exits.size() == 1));
                 }
             }
             if (!pieces.isEmpty()) zones.add(new Zone(start.board().speed(), List.copyOf(pieces)));

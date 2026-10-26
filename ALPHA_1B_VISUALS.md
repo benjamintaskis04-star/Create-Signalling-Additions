@@ -1,5 +1,8 @@
 # Alpha 1b visual investigation
 
+Subsequent Issue #3 turnout correction: see `ALPHA_1B_ISSUE_3_TURNOUT_VISUALS.md`.
+The original delivery and audit history below is retained for comparison.
+
 Inspected before implementation: Alpha 1a `SpeedZoneRenderer`, the installed
 Create 6.0.10-280 slim JAR (models, textures, TrackEdge and TrackRenderer bytecode),
 and Create's StationRenderer, TrackBlock and BezierConnection source.
