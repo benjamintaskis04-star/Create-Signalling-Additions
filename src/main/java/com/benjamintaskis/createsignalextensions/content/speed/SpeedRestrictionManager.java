@@ -127,7 +127,6 @@ public final class SpeedRestrictionManager {
             state.manualShuntActive = TrainMovementModeManager.isManualShunting(server.overworld(), train);
             boolean playerControlled = isPlayerControlled(train);
             scanTriggers(server, train, state);
-            resolvePendingManualTurnout(server, train, state, playerControlled);
             scanUpcomingRestriction(server, train, state, playerControlled);
             reportEffectiveLimitChange(train, state);
             updatePlayerSpeedLimit(train, state, playerControlled);
@@ -304,36 +303,8 @@ public final class SpeedRestrictionManager {
                 TrainSpeedCategory category = TrainCategoryManager.getEffectiveCategory(level, train);
                 Integer selected = board.isUnrestricted() ? null : board.getApplicableSpeedKmh(category, manual);
 
-                if (board.isTurnoutBoard()) {
-                    if (!isNextJunctionDiverging(server, train)) {
-                        if (manual) {
-                            // A manual driver can pass an X board before pressing A/D at the
-                            // junction. Keep the board armed briefly so the subsequent manual
-                            // turnout choice can still make the restriction authoritative.
-                            state.pendingManualTurnoutLimitKmh = selected;
-                            state.pendingManualTurnoutTicks = 200;
-                            state.pendingManualTurnoutBoard = signPos.toShortString();
-                            log(train, "passed X" + selected + " turnout speed board at " + signPos.toShortString()
-                                    + "; manual route not yet diverging, turnout restriction armed for next junction");
-                        } else {
-                            log(train, "ignored X" + selected + " turnout speed board at " + signPos.toShortString()
-                                    + "; next junction route is main/straight");
-                        }
-                        continue;
-                    }
-                    state.pendingManualTurnoutLimitKmh = null;
-                    state.pendingManualTurnoutTicks = 0;
-                    state.pendingManualTurnoutBoard = null;
-                    state.routeLimitKmh = selected;
-                    state.routeRestrictionSerial++;
-                    state.instructionSerial++;
-                    log(train, "passed X" + selected + " turnout speed board at " + signPos.toShortString()
-                            + " (category " + category.displayName() + (manual ? ", manual/default" : "")
-                            + "); diverging route restriction active until next ordinary speed board");
-                    continue;
-                }
-
-                // An ordinary board supersedes a carried turnout restriction, but
+                // Every speed board, including X-prefixed boards, supersedes any
+                // legacy carried turnout restriction, but
                 // releasing to a higher/unrestricted speed still obeys the normal
                 // whole-train-clear boundary. Compare against the CURRENT effective
                 // restriction before deciding whether this is an increase.
@@ -341,7 +312,7 @@ public final class SpeedRestrictionManager {
 
                 // Lower restrictions take effect at the front of the train. Higher
                 // restrictions (including unrestricted) wait for the rear to clear.
-                boolean isHigher = selected == null || (current != null && selected > current);
+                boolean isHigher = SpeedBoardRules.requiresRearClearance(current, selected);
                 if (isHigher) {
                     // Keep every higher-speed boundary the train is currently spanning.
                     // A long train may have its front beyond several boards before its rear
@@ -550,6 +521,10 @@ public final class SpeedRestrictionManager {
                     Vec3 target = candidate.target();
                     if (target.distanceToSqr(pos) > 1.25 * 1.25)
                         continue;
+                    // Nearby turnout branches can be within the proximity radius.
+                    // Only anticipate boards linked to the edge on the copied actual route.
+                    if (!SpeedBoardRouteMatch.matches(train.graph, scout.edge, target,
+                            board.getTargetTrack(), board.getBezierTarget())) continue;
                     if (!isValidSignDirection(linked, scoutMotion))
                         continue;
                     String key = dim.location() + ":speed:" + linked.getBlockPos().asLong();
@@ -560,8 +535,6 @@ public final class SpeedRestrictionManager {
                         return;
                     TrainSpeedCategory category = TrainCategoryManager.getEffectiveCategory(level, train);
                     int selected = board.getApplicableSpeedKmh(category, playerControlled);
-                    if (board.isTurnoutBoard() && !isNextJunctionDiverging(server, train))
-                        continue; // An irrelevant X board must not hide later restrictions.
                     Integer currentEffective = state.effectiveLimitKmh();
                     double comparison = currentEffective == null ? blocksPerTickToKmh(train.maxSpeed()) : currentEffective;
                     if (selected < comparison) {
@@ -594,122 +567,6 @@ public final class SpeedRestrictionManager {
         }
     }
 
-    /**
-     * Returns true when the train's selected route at the first junction ahead is
-     * not Create's natural straight/default continuation. This deliberately uses
-     * a private travelling-point scout and a COPY of Navigation.currentPath, so
-     * checking an X board can never consume or alter the real scheduled route.
-     */
-    private static boolean isNextJunctionDiverging(MinecraftServer server, Train train) {
-        if (train.graph == null || train.carriages.isEmpty())
-            return false;
-        boolean reversed = TrainTravelDirection.reversed(train);
-        double travelSign = reversed ? -1.0 : 1.0;
-        Carriage frontCarriage = reversed ? train.carriages.get(train.carriages.size() - 1) : train.carriages.get(0);
-        TravellingPoint source = reversed ? frontCarriage.getTrailingPoint() : frontCarriage.getLeadingPoint();
-        if (source == null || source.edge == null || source.node1 == null)
-            return false;
-
-        TravellingPoint scout = new TravellingPoint(source.node1, source.node2, source.edge, source.position, source.upsideDown);
-        List<Couple<TrackNode>> pathCopy = train.navigation != null && train.navigation.isActive()
-                ? copyNavigationPath(train.navigation) : null;
-        if (train.navigation != null && train.navigation.isActive() && pathCopy == null)
-            return false;
-
-        final boolean[] foundJunction = {false};
-        final boolean[] diverging = {false};
-        double travelled = 0.0;
-        double lookAhead = SpeedBrakingEnvelope.lookAheadBlocks(train.speed, train.acceleration());
-        while (travelled < lookAhead && !foundJunction[0]) {
-            try {
-                Vec3 here = scout.getPosition(train.graph);
-                Vec3 ahead = scout.getPositionWithOffset(train.graph, travelSign * 0.25, false);
-                Vec3 steerVector = ahead.subtract(here);
-                TravellingPoint.ITrackSelector selectedBase = pathCopy != null
-                        ? readOnlyNavigationSelector(pathCopy)
-                        : scout.steer(train.manualSteer, steerVector);
-                TravellingPoint.ITrackSelector defaultBase = scout.steer(TravellingPoint.SteerDirection.NONE, steerVector);
-                TravellingPoint.ITrackSelector detecting = (graph, optionsPair) -> {
-                    List<Map.Entry<TrackNode, TrackEdge>> options = optionsPair.getSecond();
-                    Map.Entry<TrackNode, TrackEdge> selected;
-
-                    if (pathCopy == null
-                            && train.manualSteer != TravellingPoint.SteerDirection.NONE
-                            && options != null && options.size() > 1) {
-                        // Beta 1a2: mirror RouteProbe's proven Alpha 7a5 manual A/D
-                        // topology choice instead of relying on TravellingPoint.steer()
-                        // from a detached scout. The latter only became reliable when
-                        // Create had an automatic/station navigation path active.
-                        selected = selectManualOutgoingLikeRouteProbe(
-                                graph, reversed ? scout.node2 : scout.node1,
-                                reversed ? scout.node1 : scout.node2, train.manualSteer, options);
-                        if (selected == null)
-                            selected = selectedBase.apply(graph, optionsPair);
-                    } else {
-                        selected = selectedBase.apply(graph, optionsPair);
-                    }
-
-                    if (options != null && options.size() > 1) {
-                        Map.Entry<TrackNode, TrackEdge> main = defaultBase.apply(graph, optionsPair);
-                        foundJunction[0] = true;
-                        diverging[0] = selected != null && main != null && selected.getValue() != main.getValue();
-                    }
-                    return selected;
-                };
-                double moved = Math.abs(scout.travel(train.graph, travelSign * ADVANCE_STEP_BLOCKS, detecting));
-                if (moved < 1.0e-5)
-                    break;
-                travelled += moved;
-            } catch (Exception ex) {
-                return false;
-            }
-        }
-        return foundJunction[0] && diverging[0];
-    }
-
-    /**
-     * Choose the driver's A/D branch using the same geometry/sign convention as
-     * RouteProbe's Alpha 7a5 manual-route prediction (LEFT=-1, RIGHT=+1).
-     *
-     * This is intentionally read-only: it selects one of the already supplied
-     * junction options and never asks Create to calculate a new route.
-     */
-    private static Map.Entry<TrackNode, TrackEdge> selectManualOutgoingLikeRouteProbe(
-            com.simibubi.create.content.trains.graph.TrackGraph graph,
-            TrackNode incomingNode,
-            TrackNode junction,
-            TravellingPoint.SteerDirection steer,
-            List<Map.Entry<TrackNode, TrackEdge>> options) {
-        if (incomingNode == null || junction == null || steer == TravellingPoint.SteerDirection.NONE)
-            return null;
-
-        TrackEdge incomingEdge = graph.getConnectionsFrom(incomingNode).get(junction);
-        if (incomingEdge == null)
-            return null;
-
-        Vec3 trajectory = incomingEdge.getDirection(false);
-        Vec3 normal = trajectory.cross(junction.getNormal());
-        double targetDot = steer == TravellingPoint.SteerDirection.LEFT ? -1.0 : 1.0;
-
-        double closest = Double.MAX_VALUE;
-        Map.Entry<TrackNode, TrackEdge> best = null;
-        for (Map.Entry<TrackNode, TrackEdge> option : options) {
-            if (option == null || option.getKey() == incomingNode || option.getValue() == null)
-                continue;
-            if (!incomingEdge.canTravelTo(option.getValue()))
-                continue;
-
-            Vec3 entryTrajectory = option.getValue().getDirection(true);
-            double dot = normal.dot(entryTrajectory);
-            double diff = Math.abs(targetDot - dot);
-            if (diff > closest)
-                continue;
-            closest = diff;
-            best = option;
-        }
-        return best;
-    }
-
     @SuppressWarnings("unchecked")
     private static List<Couple<TrackNode>> copyNavigationPath(Navigation navigation) {
         try {
@@ -731,7 +588,7 @@ public final class SpeedRestrictionManager {
         }
     }
 
-    private static TravellingPoint.ITrackSelector readOnlyNavigationSelector(List<Couple<TrackNode>> pathCopy) {
+    static TravellingPoint.ITrackSelector readOnlyNavigationSelector(List<Couple<TrackNode>> pathCopy) {
         return (graph, optionsPair) -> {
             List<Map.Entry<TrackNode, TrackEdge>> options = optionsPair.getSecond();
             if (options == null || options.isEmpty())
@@ -753,35 +610,6 @@ public final class SpeedRestrictionManager {
         };
     }
 
-
-    private static void resolvePendingManualTurnout(MinecraftServer server, Train train, TrainSpeedState state, boolean playerControlled) {
-        if (state.pendingManualTurnoutLimitKmh == null)
-            return;
-        if (!playerControlled || state.pendingManualTurnoutTicks-- <= 0) {
-            state.pendingManualTurnoutLimitKmh = null;
-            state.pendingManualTurnoutTicks = 0;
-            state.pendingManualTurnoutBoard = null;
-            return;
-        }
-        // manualSteer is Create's live A/D request. Once the driver actually selects
-        // the diverging branch, the already-passed X board becomes authoritative.
-        if (train.manualSteer == TravellingPoint.SteerDirection.NONE)
-            return;
-        // isNextJunctionDiverging uses Create's own steering selector, so this follows
-        // the same physical branch the manual train will take without any repath.
-        if (!isNextJunctionDiverging(server, train))
-            return;
-        int limit = state.pendingManualTurnoutLimitKmh;
-        String board = state.pendingManualTurnoutBoard == null ? "unknown" : state.pendingManualTurnoutBoard;
-        state.pendingManualTurnoutLimitKmh = null;
-        state.pendingManualTurnoutTicks = 0;
-        state.pendingManualTurnoutBoard = null;
-        state.routeLimitKmh = limit;
-        state.routeRestrictionSerial++;
-        state.instructionSerial++;
-        log(train, "manual diverging route selected after X" + limit + " board at " + board
-                + "; turnout restriction now active until next ordinary speed board");
-    }
 
     private static void syncPlayerSpeedHud(MinecraftServer server, Train train, TrainSpeedState state, boolean playerControlled) {
         if (!playerControlled)
@@ -937,7 +765,7 @@ public final class SpeedRestrictionManager {
         // The sign face points toward an approaching driver; therefore valid train
         // movement is opposite the face normal. A small dead-band avoids stationary
         // jitter being interpreted as a passage.
-        return motion.dot(faceNormal) < -1.0e-5;
+        return SpeedBoardRules.validDirection(motion, faceNormal);
     }
 
     private static boolean isPlayerControlled(Train train) {
@@ -1069,9 +897,6 @@ public final class SpeedRestrictionManager {
         Integer upcomingLimitKmh;
         double upcomingDistanceBlocks = Double.POSITIVE_INFINITY;
         String lastManualApproachBoardKey;
-        Integer pendingManualTurnoutLimitKmh;
-        int pendingManualTurnoutTicks;
-        String pendingManualTurnoutBoard;
         final Set<String> nearbyTriggers = new HashSet<>();
         Vec3 lastFrontPosition;
         ResourceKey<Level> lastFrontDimension;

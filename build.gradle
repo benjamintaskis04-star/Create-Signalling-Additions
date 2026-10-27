@@ -126,7 +126,7 @@ tasks.named('classes') {
 tasks.named('jar') {
     dependsOn safeProcessResources
     // Keep the corrective test artifact distinct while retaining the internal Alpha 1b version.
-    archiveClassifier = 'issues2-3-running-side-turnout-test'
+    archiveClassifier = 'cosmetic-x-boards-test'
 }
 
 // Small deterministic regression checks run without starting Minecraft.
@@ -163,3 +163,11 @@ def runningSideChecks = tasks.register('runningSideChecks', JavaExec) {
     javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
 }
 tasks.named('check') { dependsOn runningSideChecks }
+
+def cosmeticXChecks = tasks.register('cosmeticXChecks', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.benjamintaskis.createsignalextensions.content.speed.CosmeticXChecks'
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+}
+tasks.named('check') { dependsOn cosmeticXChecks }

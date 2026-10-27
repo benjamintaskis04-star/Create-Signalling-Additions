@@ -27,7 +27,8 @@ public final class Alpha1aChecks {
                 new SpeedZoneBoundaryResolver.Board(0, 60, false),
                 new SpeedZoneBoundaryResolver.Board(10, 20, true),
                 new SpeedZoneBoundaryResolver.Board(30, 0, false)), 100);
-        check(zones.size() == 1 && zones.getFirst().end() == 30, "Unrestricted ends zone; X board does not split fixed zone");
+        check(zones.size() == 2 && zones.getFirst().end() == 10 && zones.getLast().speedKmh() == 20
+                && zones.getLast().end() == 30, "X board is an ordinary boundary; unrestricted ends its zone");
         zones = SpeedZoneBoundaryResolver.resolve(List.of(
                 new SpeedZoneBoundaryResolver.Board(0, 60, false),
                 new SpeedZoneBoundaryResolver.Board(20, 100, false),

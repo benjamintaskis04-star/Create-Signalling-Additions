@@ -3,7 +3,6 @@ package com.benjamintaskis.createsignalextensions;
 import com.benjamintaskis.createsignalextensions.config.ClientConfig;
 import com.benjamintaskis.createsignalextensions.config.SpeedHighlightRunningSide;
 import com.benjamintaskis.createsignalextensions.client.SpeedZonePulse;
-import com.benjamintaskis.createsignalextensions.client.TurnoutVisualRoutes;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.electronwill.nightconfig.toml.TomlParser;
 import com.electronwill.nightconfig.toml.TomlWriter;
@@ -74,16 +73,12 @@ public final class RunningSideChecks {
         for (int mirror : new int[]{-1, 1}) {
             Vec3 incoming = new Vec3(1, 0, 0);
             List<Vec3> routes = List.of(incoming, new Vec3(1, 0, .25 * mirror));
-            int straight = TurnoutVisualRoutes.straightIndex(incoming, up, routes);
-            check(straight == 0, "Issue #3 retains unique straight route on mirrored turnout");
             for (var mode : SpeedHighlightRunningSide.values()) {
                 for (int route = 0; route < routes.size(); route++) {
                     Vec3 direction = routes.get(route).normalize();
                     Vec3 physicalLane = up.cross(direction).normalize().scale(mode == SpeedHighlightRunningSide.LEFT ? 1 : -1);
                     Vec3 meshRight = new Vec3(-direction.z, 0, direction.x).normalize();
                     check(mode.directionIndex(physicalLane.dot(meshRight)) == 0, "Straight and diverging routes use chosen travel-relative half");
-                    check(TurnoutVisualRoutes.follows(true, straight, route, routes.size()) == (route == 1),
-                            "Running side does not change the X20 branch classification");
                 }
             }
         }

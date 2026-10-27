@@ -11,8 +11,7 @@ import java.util.List;
  * starts its zone at its linked track position and the next board on that route
  * ends it. This does not infer paths through ambiguous junctions: the caller
  * must first resolve a route using Create's graph and provide only boards on it.
- * Turnout-specific restrictions are intentionally excluded because they depend
- * on the selected train route rather than forming an unconditional fixed zone.
+ * The legacy turnout/X flag is cosmetic: every board is a normal boundary.
  */
 public final class SpeedZoneBoundaryResolver {
     private SpeedZoneBoundaryResolver() {}
@@ -24,7 +23,7 @@ public final class SpeedZoneBoundaryResolver {
         if (boards == null || !Double.isFinite(routeLength) || routeLength <= 0) return List.of();
         List<Board> ordered = new ArrayList<>();
         for (Board b : boards) {
-            if (b != null && !b.turnout && b.speedKmh >= 0 &&
+            if (b != null && b.speedKmh >= 0 &&
                     Double.isFinite(b.distance) && b.distance >= 0 && b.distance < routeLength)
                 ordered.add(b);
         }
