@@ -12,6 +12,7 @@ public final class CommonConfig {
     public static final ModConfigSpec.IntValue MAX_SIGNALLING_FORCED_CHUNKS;
     public static final ModConfigSpec.IntValue SHUNT_PROCEED_SPEED_KMH;
     public static final ModConfigSpec.BooleanValue SPEED_DIAGNOSTICS;
+    public static final ModConfigSpec.BooleanValue SPEED_GRAPH_DIAGNOSTICS;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -33,6 +34,8 @@ public final class CommonConfig {
                 .defineInRange("max_forced_chunks", 128, 16, 2048);
         b.pop();
         b.push("speed_restrictions");
+        SPEED_GRAPH_DIAGNOSTICS = b.comment("Rate-limited graph association, route choice and board accept/reject diagnostics. Disabled during normal gameplay.")
+                .define("graph_diagnostics", false);
         SPEED_DIAGNOSTICS = b.comment("Log speed-board decisions and speed-state persistence (load, restore, changes and disk save). Diagnostic build default: enabled.", "Independent of signals.signal_debug. Disable after testing to reduce log volume.")
                 .define("speed_diagnostics", true);
         SHUNT_PROCEED_SPEED_KMH = b.comment("Maximum speed in km/h while a train is under SHUNT PROCEED authority. Cleared by an End of Shunt sign.")
@@ -48,5 +51,6 @@ public final class CommonConfig {
     public static boolean adaptiveChunkLoading() { return ADAPTIVE_CHUNK_LOADING.get(); }
     public static int maxSignallingForcedChunks() { return MAX_SIGNALLING_FORCED_CHUNKS.get(); }
     public static boolean speedDiagnostics() { return SPEED_DIAGNOSTICS.get(); }
+    public static boolean speedGraphDiagnostics() { return SPEED_GRAPH_DIAGNOSTICS.get(); }
     public static int shuntProceedSpeedKmh() { return SHUNT_PROCEED_SPEED_KMH.get(); }
 }

@@ -88,6 +88,8 @@ public final class SpeedRestrictionManager {
         STATES.clear();
         TRACK_LINKED_SIGNS.clear();
         SpeedZoneSync.clear();
+        SpeedBoardGraphResolver.clear();
+        SpeedGraphDiagnostics.clear();
     }
 
     public static void registerTrackLinked(TrackLinkedBlockEntity be) {
@@ -228,6 +230,9 @@ public final class SpeedRestrictionManager {
         // Track-linked equipment is checked against its SELECTED TRACK POINT, not
         // against the physical sign block. This fixes speed boards mounted a few
         // blocks away from the line and works for both straight and Bezier targets.
+        var graphPoint = SpeedBoardGraphLocation.Sample.of(train.graph, point, reversed);
+        scanSpeedBoards(server, level, train, state, state.lastFrontGraph, graphPoint);
+        state.lastFrontGraph = graphPoint;
         scanTrackLinkedSigns(server, level, train, state, position, motion, dimension, now);
 
         // Ground shunt signals are not track-linked BEs, so retain a small local
@@ -277,7 +282,7 @@ public final class SpeedRestrictionManager {
                 iterator.remove();
                 continue;
             }
-            if (!linked.hasTrackTarget())
+            if (linked instanceof SpeedBoardBlockEntity || !linked.hasTrackTarget())
                 continue;
 
             Vec3 target = linked.getTrackTargetPosition(level);
@@ -298,62 +303,7 @@ public final class SpeedRestrictionManager {
             if (state.nearbyTriggers.contains(key))
                 continue;
 
-            if (linked instanceof SpeedBoardBlockEntity board) {
-                boolean manual = isPlayerControlled(train);
-                TrainSpeedCategory category = TrainCategoryManager.getEffectiveCategory(level, train);
-                Integer selected = board.isUnrestricted() ? null : board.getApplicableSpeedKmh(category, manual);
-
-                // Every speed board, including X-prefixed boards, supersedes any
-                // legacy carried turnout restriction, but
-                // releasing to a higher/unrestricted speed still obeys the normal
-                // whole-train-clear boundary. Compare against the CURRENT effective
-                // restriction before deciding whether this is an increase.
-                Integer current = state.effectiveLimitKmh();
-
-                // Lower restrictions take effect at the front of the train. Higher
-                // restrictions (including unrestricted) wait for the rear to clear.
-                boolean isHigher = SpeedBoardRules.requiresRearClearance(current, selected);
-                if (isHigher) {
-                    // Keep every higher-speed boundary the train is currently spanning.
-                    // A long train may have its front beyond several boards before its rear
-                    // reaches the first one; one pending slot would lose that history.
-                    // A restored boundary may be encountered again after reloading,
-                    // or a trigger can be observed twice while the front remains near
-                    // the same board. Do not queue a second rear-clearance instruction.
-                    boolean alreadyPending = state.pendingHigherBoundaries.stream()
-                            .anyMatch(boundary -> boundary.key.equals(key)
-                                    && boundary.dimension.equals(dimension));
-                    if (alreadyPending) {
-                        log(train, "ignored duplicate pending rear-clearance boundary at "
-                                + signPos.toShortString());
-                        continue;
-                    }
-                    state.pendingHigherBoundaries.add(new PendingSpeedBoundary(
-                            key, selected, signPos.immutable(), dimension, true, state.routeRestrictionSerial,
-                            target, motion.normalize()));
-                    log(train, "front passed " + (selected == null ? "unrestricted" : selected + " km/h")
-                            + " speed board at " + signPos.toShortString()
-                            + "; waiting for rear of train to clear before applying"
-                            + " (pending boundaries=" + state.pendingHigherBoundaries.size() + ")");
-                } else {
-                    // A newly encountered lower/equal restriction is authoritative from
-                    // the front of the train. Any earlier pending increases are now stale:
-                    // they must never raise the speed after the front has already entered
-                    // this newer, more restrictive section.
-                    if (!state.pendingHigherBoundaries.isEmpty()) {
-                        log(train, "discarded " + state.pendingHigherBoundaries.size()
-                                + " older pending higher-speed boundary/boundaries because front entered "
-                                + selected + " km/h restriction");
-                        state.pendingHigherBoundaries.clear();
-                    }
-                    state.routeLimitKmh = null;
-                    state.postedLimitKmh = selected;
-                    state.instructionSerial++;
-                    log(train, "passed " + selected + " km/h speed board at " + signPos.toShortString()
-                            + " (category " + category.displayName() + (manual ? ", manual/default" : "")
-                            + "; linked track point " + formatPos(target) + ")");
-                }
-            } else if (linked instanceof EndOfShuntSignBlockEntity) {
+            if (linked instanceof EndOfShuntSignBlockEntity) {
                 if (state.shuntAuthority)
                     log(train, "passed End of Shunt at " + signPos.toShortString()
                             + "; shunt restriction cleared");
@@ -364,6 +314,90 @@ public final class SpeedRestrictionManager {
 
         if (byPos.isEmpty())
             TRACK_LINKED_SIGNS.remove(dimension);
+    }
+
+    private static void scanSpeedBoards(MinecraftServer server, ServerLevel level, Train train, TrainSpeedState state,
+                                        SpeedBoardGraphLocation.Sample previous, SpeedBoardGraphLocation.Sample current) {
+        var signs = TRACK_LINKED_SIGNS.get(level.dimension());
+        if (signs == null) return;
+        record Passage(SpeedBoardBlockEntity board, SpeedBoardGraphLocation location, double distance) {}
+        List<Passage> passages = new ArrayList<>();
+        for (var linked : signs.values()) {
+            if (!(linked instanceof SpeedBoardBlockEntity board) || board.isRemoved() || board.getLevel() != level) continue;
+            var resolved = SpeedBoardGraphResolver.resolve(level, board);
+            var location = resolved.location();
+            double distance = location == null ? Double.NaN : location.crossed(previous, current, Math.abs(train.speed) * 2 + 1);
+            if (CommonConfig.speedGraphDiagnostics()) SpeedGraphDiagnostics.log(server.getTickCount(), train.id,
+                    board.getBlockPos(), "FRONT", Double.isFinite(distance) ? "ACCEPT_CROSSING" : location == null ? resolved.reason() : "NOT_CROSSED_ON_ROUTE",
+                    location, current, "anchor=" + board.getTargetTrack() + " curve=" + board.getBezierTarget()
+                    + " targetDirection=" + board.getTargetDirection() + " speed=" + board.getDefaultSpeedKmh());
+            if (Double.isFinite(distance)) passages.add(new Passage(board, location, distance));
+        }
+        passages.sort(java.util.Comparator.comparingDouble(Passage::distance));
+        for (var passage : passages) applySpeedBoard(server, level, train, state, passage.board(), passage.location());
+    }
+
+    private static void applySpeedBoard(MinecraftServer server, ServerLevel level, Train train, TrainSpeedState state,
+                                        SpeedBoardBlockEntity board, SpeedBoardGraphLocation location) {
+        BlockPos signPos = board.getBlockPos();
+        var dimension = level.dimension();
+        String key = dimension.location() + ":speed:" + signPos.asLong();
+        Vec3 target = location.edge().getPosition(location.graph(), location.position() / location.edge().getLength());
+        boolean manual = isPlayerControlled(train);
+        TrainSpeedCategory category = TrainCategoryManager.getEffectiveCategory(level, train);
+        Integer selected = board.isUnrestricted() ? null : board.getApplicableSpeedKmh(category, manual);
+
+        // Every speed board, including X-prefixed boards, supersedes any
+        // legacy carried turnout restriction, but
+        // releasing to a higher/unrestricted speed still obeys the normal
+        // whole-train-clear boundary. Compare against the CURRENT effective
+        // restriction before deciding whether this is an increase.
+        Integer current = state.effectiveLimitKmh();
+
+        // Lower restrictions take effect at the front of the train. Higher
+        // restrictions (including unrestricted) wait for the rear to clear.
+        boolean isHigher = SpeedBoardRules.requiresRearClearance(current, selected);
+        if (isHigher) {
+            // Keep every higher-speed boundary the train is currently spanning.
+            // A long train may have its front beyond several boards before its rear
+            // reaches the first one; one pending slot would lose that history.
+            // A restored boundary may be encountered again after reloading,
+            // or a trigger can be observed twice while the front remains near
+            // the same board. Do not queue a second rear-clearance instruction.
+            boolean alreadyPending = state.pendingHigherBoundaries.stream()
+                    .anyMatch(boundary -> boundary.key.equals(key)
+                            && boundary.dimension.equals(dimension));
+            if (alreadyPending) {
+                log(train, "ignored duplicate pending rear-clearance boundary at "
+                        + signPos.toShortString());
+                return;
+            }
+            state.pendingHigherBoundaries.add(new PendingSpeedBoundary(
+                    key, selected, signPos.immutable(), dimension, true, state.routeRestrictionSerial,
+                    target, location.edge().getDirection(true)));
+            log(train, "front passed " + (selected == null ? "unrestricted" : selected + " km/h")
+                    + " speed board at " + signPos.toShortString()
+                    + "; waiting for rear of train to clear before applying"
+                    + " (pending boundaries=" + state.pendingHigherBoundaries.size() + ")");
+        } else {
+            // A newly encountered lower/equal restriction is authoritative from
+            // the front of the train. Any earlier pending increases are now stale:
+            // they must never raise the speed after the front has already entered
+            // this newer, more restrictive section.
+            if (!state.pendingHigherBoundaries.isEmpty()) {
+                log(train, "discarded " + state.pendingHigherBoundaries.size()
+                        + " older pending higher-speed boundary/boundaries because front entered "
+                        + selected + " km/h restriction");
+                state.pendingHigherBoundaries.clear();
+            }
+            state.routeLimitKmh = null;
+            state.postedLimitKmh = selected;
+            state.instructionSerial++;
+            log(train, "passed " + selected + " km/h speed board at " + signPos.toShortString()
+                    + " (category " + category.displayName() + (manual ? ", manual/default" : "")
+                    + "; linked track point " + formatPos(target) + ")");
+        }
+
     }
 
     private static void scanRearForPendingBoard(MinecraftServer server, Train train, TrainSpeedState state,
@@ -377,31 +411,24 @@ public final class SpeedRestrictionManager {
         if (level == null)
             return;
         Map<BlockPos, TrackLinkedBlockEntity> byPos = TRACK_LINKED_SIGNS.get(dimension);
-        Vec3 rear = rearPoint.getPosition(train.graph);
         boolean reversed = TrainTravelDirection.reversed(train);
-        Vec3 previousRear = dimension.equals(state.lastRearDimension) && state.lastRearReversed == reversed
-                ? state.lastRearPosition : null;
-        state.lastRearPosition = rear;
-        state.lastRearDimension = dimension;
-        state.lastRearReversed = reversed;
+        var currentRear = SpeedBoardGraphLocation.Sample.of(train.graph, rearPoint, reversed);
+        var previousRear = state.lastRearGraph;
+        state.lastRearGraph = currentRear;
         Iterator<PendingSpeedBoundary> pending = state.pendingHigherBoundaries.iterator();
         while (pending.hasNext()) {
             PendingSpeedBoundary boundary = pending.next();
             if (!dimension.equals(boundary.dimension))
                 continue;
-            Vec3 target = boundary.target, forward = boundary.forward;
-            // Old Alpha 1 saves lack a frozen target; upgrade when the sign is loaded.
-            if (target == null || forward == null) {
-                TrackLinkedBlockEntity linked = byPos == null ? null : byPos.get(boundary.signPos);
-                if (!(linked instanceof SpeedBoardBlockEntity) || !linked.hasTrackTarget()) continue;
-                target = linked.getTrackTargetPosition(level);
-                Direction facing = linked.getBlockState().getValue(HorizontalDirectionalBlock.FACING);
-                forward = new Vec3(-facing.getStepX(), 0, -facing.getStepZ());
-                boundary.target = target; boundary.forward = forward;
-            }
-            if (!RearClearance.crossed(previousRear, rear, target, forward, TRIGGER_RADIUS))
-                continue;
-
+            var linked = byPos == null ? null : byPos.get(boundary.signPos);
+            if (!(linked instanceof SpeedBoardBlockEntity board)) continue;
+            var location = SpeedBoardGraphResolver.resolve(level, board).location();
+            if (location == null) continue;
+            Vec3 target = location.edge().getPosition(location.graph(), location.position() / location.edge().getLength());
+            // Do not release a frozen boundary after the sign has been relinked elsewhere.
+            if (!SpeedBoardGraphLocation.acceptsFrozenTarget(boundary.target, target, board.getTrackTargetPosition(level))) continue;
+            boundary.target = target; // Upgrade the old block-centre/curve interpolation convention.
+            if (!Double.isFinite(location.crossed(previousRear, currentRear, Math.abs(train.speed) * 2 + 1))) continue;
             state.postedLimitKmh = boundary.limitKmh;
             if (boundary.clearsRoute && state.routeRestrictionSerial == boundary.routeSerial)
                 state.routeLimitKmh = null;
@@ -424,7 +451,7 @@ public final class SpeedRestrictionManager {
     // Snapshot speed-board track targets once per dimension per train scan. The old
     // implementation resolved every board target at every 1-block scout step.
     // A local snapshot avoids persistent cache invalidation and keeps registry order.
-    private record ScoutedSpeedBoard(SpeedBoardBlockEntity board, Vec3 target) {}
+    private record ScoutedSpeedBoard(SpeedBoardBlockEntity board, SpeedBoardGraphLocation location) {}
 
     private static List<ScoutedSpeedBoard> snapshotSpeedBoards(ServerLevel level) {
         Map<BlockPos, TrackLinkedBlockEntity> signs = TRACK_LINKED_SIGNS.get(level.dimension());
@@ -432,11 +459,10 @@ public final class SpeedRestrictionManager {
             return List.of();
         List<ScoutedSpeedBoard> result = new ArrayList<>();
         for (TrackLinkedBlockEntity linked : signs.values()) {
-            if (!(linked instanceof SpeedBoardBlockEntity board) || !linked.hasTrackTarget())
+            if (!(linked instanceof SpeedBoardBlockEntity board) || board.isRemoved() || board.getLevel() != level || !linked.hasTrackTarget())
                 continue;
-            Vec3 target = linked.getTrackTargetPosition(level);
-            if (target != null)
-                result.add(new ScoutedSpeedBoard(board, target));
+            var location = SpeedBoardGraphResolver.resolve(level, board).location();
+            if (location != null) result.add(new ScoutedSpeedBoard(board, location));
         }
         return result;
     }
@@ -458,6 +484,8 @@ public final class SpeedRestrictionManager {
         TravellingPoint scout = new TravellingPoint(source.node1, source.node2, source.edge, source.position, source.upsideDown);
         double travelled = 0.0;
         String ignoredCurrent = null;
+        SpeedBoardGraphLocation.Sample previousScout = null;
+        double previousTravelled = 0;
         // A selector consumes entries from this private list as the scout crosses
         // junctions. Copy it ONCE: copying on every step loses that progress.
         boolean navigating = train.navigation != null && train.navigation.isActive();
@@ -514,49 +542,62 @@ public final class SpeedRestrictionManager {
 
             List<ScoutedSpeedBoard> boards = boardsByDimension.computeIfAbsent(
                     dim, $ -> snapshotSpeedBoards(level));
-            if (!boards.isEmpty()) {
-                for (ScoutedSpeedBoard candidate : boards) {
-                    SpeedBoardBlockEntity board = candidate.board();
-                    TrackLinkedBlockEntity linked = board;
-                    Vec3 target = candidate.target();
-                    if (target.distanceToSqr(pos) > 1.25 * 1.25)
-                        continue;
-                    // Nearby turnout branches can be within the proximity radius.
-                    // Only anticipate boards linked to the edge on the copied actual route.
-                    if (!SpeedBoardRouteMatch.matches(train.graph, scout.edge, target,
-                            board.getTargetTrack(), board.getBezierTarget())) continue;
-                    if (!isValidSignDirection(linked, scoutMotion))
-                        continue;
-                    String key = dim.location() + ":speed:" + linked.getBlockPos().asLong();
-                    if (key.equals(ignoredCurrent))
-                        continue;
-                    ignoredCurrent = key;
-                    if (board.isUnrestricted())
-                        return;
-                    TrainSpeedCategory category = TrainCategoryManager.getEffectiveCategory(level, train);
-                    int selected = board.getApplicableSpeedKmh(category, playerControlled);
-                    Integer currentEffective = state.effectiveLimitKmh();
-                    double comparison = currentEffective == null ? blocksPerTickToKmh(train.maxSpeed()) : currentEffective;
-                    if (selected < comparison) {
-                        state.upcomingLimitKmh = selected;
-                        state.upcomingDistanceBlocks = travelled;
-                        if (playerControlled && !key.equals(state.lastManualApproachBoardKey)) {
-                            setPlayerThrottleForLimit(train, selected,
-                                    "upcoming lower restriction " + selected + " km/h");
-                            state.lastManualApproachBoardKey = key;
-                        }
-                    }
-                    return; // first board ahead governs the next posted transition
+            var currentScout = SpeedBoardGraphLocation.Sample.of(train.graph, scout, reversed);
+            ScoutedSpeedBoard nearest = null;
+            double nearestDistance = Double.POSITIVE_INFINITY;
+            for (var candidate : boards) {
+                var location = candidate.location();
+                double ahead = location.ahead(currentScout);
+                double distance = Double.isFinite(ahead) && ahead >= -1.0e-7 && ahead <= ADVANCE_STEP_BLOCKS
+                        ? travelled + Math.max(0, ahead) : Double.POSITIVE_INFINITY;
+                double crossed = location.crossed(previousScout, currentScout, ADVANCE_STEP_BLOCKS * 4 + 1);
+                if (Double.isFinite(crossed)) distance = Math.min(distance, previousTravelled + crossed);
+                String key = dim.location() + ":speed:" + candidate.board().getBlockPos().asLong();
+                if (!key.equals(ignoredCurrent) && distance < nearestDistance) {
+                    nearest = candidate; nearestDistance = distance;
                 }
+                if (CommonConfig.speedGraphDiagnostics()) SpeedGraphDiagnostics.log(server.getTickCount(), train.id,
+                        candidate.board().getBlockPos(), "ADVANCE", Double.isFinite(distance) ? "BOARD_ON_SCOUT_ROUTE" : "OTHER_EDGE_DIRECTION_OR_POSITION",
+                        location, currentScout, "ahead=" + ahead + " distance=" + distance);
             }
-
+            if (nearest != null) {
+                var board = nearest.board();
+                ignoredCurrent = dim.location() + ":speed:" + board.getBlockPos().asLong();
+                if (board.isUnrestricted()) return;
+                int selected = board.getApplicableSpeedKmh(TrainCategoryManager.getEffectiveCategory(level, train), playerControlled);
+                Integer currentEffective = state.effectiveLimitKmh();
+                double comparison = currentEffective == null ? blocksPerTickToKmh(train.maxSpeed()) : currentEffective;
+                if (selected < comparison) {
+                    state.upcomingLimitKmh = selected;
+                    state.upcomingDistanceBlocks = nearestDistance;
+                    if (playerControlled && !ignoredCurrent.equals(state.lastManualApproachBoardKey)) {
+                        setPlayerThrottleForLimit(train, selected, "upcoming lower restriction " + selected + " km/h");
+                        state.lastManualApproachBoardKey = ignoredCurrent;
+                    }
+                }
+                return;
+            }
+            previousScout = currentScout;
+            previousTravelled = travelled;
             double moved;
             try {
                 Vec3 here = scout.getPosition(train.graph);
                 Vec3 ahead = scout.getPositionWithOffset(train.graph, travelSign * 0.25, false);
                 Vec3 steerVector = ahead.subtract(here);
                 TravellingPoint.ITrackSelector selector = navigating
-                        ? navigationSelector : scout.steer(train.manualSteer, steerVector);
+                        ? navigationSelector : scout.steer(train.manualSteer, new Vec3(0, 1, 0));
+                if (CommonConfig.speedGraphDiagnostics()) {
+                    var base = selector;
+                    selector = (graph, pair) -> {
+                        var selected = base.apply(graph, pair);
+                        SpeedGraphDiagnostics.log(server.getTickCount(), train.id, null, "JUNCTION",
+                                selected == null ? "ROUTE_UNKNOWN" : "SELECTED_ROUTE", null, currentScout,
+                                "navigation=" + navigating + " steer=" + train.manualSteer
+                                + " selected=" + (selected == null ? null : selected.getKey().getLocation().getLocation())
+                                + " options=" + pair.getSecond().stream().map(e -> e.getKey().getLocation().getLocation()).toList());
+                        return selected;
+                    };
+                }
                 moved = Math.abs(scout.travel(train.graph, travelSign * ADVANCE_STEP_BLOCKS, selector));
             } catch (Exception ex) {
                 return;
@@ -898,6 +939,8 @@ public final class SpeedRestrictionManager {
         double upcomingDistanceBlocks = Double.POSITIVE_INFINITY;
         String lastManualApproachBoardKey;
         final Set<String> nearbyTriggers = new HashSet<>();
+        SpeedBoardGraphLocation.Sample lastFrontGraph;
+        SpeedBoardGraphLocation.Sample lastRearGraph;
         Vec3 lastFrontPosition;
         ResourceKey<Level> lastFrontDimension;
         boolean lastFrontReversed;

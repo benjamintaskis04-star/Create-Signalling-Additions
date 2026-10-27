@@ -1,5 +1,9 @@
 # CSA 1.5.0 Alpha 1 Diag
 
+For the current Alpha 1b graph-association correction and focused diagnostics,
+see [ALPHA_1B_GRAPH_ASSOCIATION.md](ALPHA_1B_GRAPH_ASSOCIATION.md).
+The Alpha 1 diagnostic-package history below is retained unchanged.
+
 Diagnostic source package based on Alpha 1. Mod version remains `1.5.0-alpha.1` for compatibility; package suffix `Diag` is diagnostic only.
 
 ## Config

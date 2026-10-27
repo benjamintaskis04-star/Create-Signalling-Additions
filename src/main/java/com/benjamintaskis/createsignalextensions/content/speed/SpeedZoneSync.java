@@ -15,12 +15,8 @@ public final class SpeedZoneSync {
     public static void tick(ServerTickEvent.Post event) {
         var server = event.getServer();
         if (server.getTickCount() % 20 != 0) return;
-        long graphRevision = 0;
-        for (var graph : com.simibubi.create.Create.RAILWAYS.trackNetworks.values())
-            graphRevision += 31L * graph.id.hashCode() + graph.getChecksum();
         for (var level : server.getAllLevels()) {
             var data = SpeedZoneBoardData.get(level);
-            data.graphRevision(graphRevision);
             for (var linked : SpeedRestrictionManager.trackLinkedSnapshot(level))
                 if (linked instanceof SpeedBoardBlockEntity board) data.update(board);
             data.validateLoaded(level);

@@ -126,7 +126,7 @@ tasks.named('classes') {
 tasks.named('jar') {
     dependsOn safeProcessResources
     // Keep the corrective test artifact distinct while retaining the internal Alpha 1b version.
-    archiveClassifier = 'cosmetic-x-boards-test'
+    archiveClassifier = 'graph-association-test'
 }
 
 // Small deterministic regression checks run without starting Minecraft.
@@ -171,3 +171,11 @@ def cosmeticXChecks = tasks.register('cosmeticXChecks', JavaExec) {
     javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
 }
 tasks.named('check') { dependsOn cosmeticXChecks }
+
+def graphAssociationChecks = tasks.register('graphAssociationChecks', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.benjamintaskis.createsignalextensions.content.speed.GraphAssociationChecks'
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+}
+tasks.named('check') { dependsOn graphAssociationChecks }

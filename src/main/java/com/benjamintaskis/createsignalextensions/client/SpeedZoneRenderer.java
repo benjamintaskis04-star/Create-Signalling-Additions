@@ -132,16 +132,16 @@ public final class SpeedZoneRenderer {
         Map<EdgeKey, List<Board>> byEdge = new HashMap<>();
         List<Mapped> starts = new ArrayList<>();
         for (Board board : boards) {
-            TrackNodeLocation a = new TrackNodeLocation(board.from()).in(level);
-            TrackNodeLocation b = new TrackNodeLocation(board.to()).in(level);
+            EdgeKey unique = null;
+            boolean ambiguous = false;
             for (TrackGraph graph : CreateClient.RAILWAYS.trackNetworks.values()) {
-                TrackNode from = graph.locateNode(a), to = graph.locateNode(b);
+                TrackNode from = com.benjamintaskis.createsignalextensions.content.speed.SpeedBoardGraphLocation.findNode(graph, level.dimension(), board.from());
+                TrackNode to = com.benjamintaskis.createsignalextensions.content.speed.SpeedBoardGraphLocation.findNode(graph, level.dimension(), board.to());
                 if (from == null || to == null || graph.getConnectionsFrom(from).get(to) == null) continue;
-                EdgeKey key = new EdgeKey(graph, from, to);
-                // The legacy turnout flag is cosmetic; every board is a normal boundary.
-                byEdge.computeIfAbsent(key, $ -> new ArrayList<>()).add(board);
-                break;
+                if (unique != null) { ambiguous = true; break; }
+                unique = new EdgeKey(graph, from, to);
             }
+            if (!ambiguous && unique != null) byEdge.computeIfAbsent(unique, $ -> new ArrayList<>()).add(board);
         }
         for (var entry : byEdge.entrySet()) {
             var ordered = entry.getValue();
