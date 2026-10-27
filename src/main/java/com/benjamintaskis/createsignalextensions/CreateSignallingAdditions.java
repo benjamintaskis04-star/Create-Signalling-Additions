@@ -54,7 +54,9 @@ public class CreateSignallingAdditions {
         NeoForge.EVENT_BUS.addListener(com.benjamintaskis.createsignalextensions.content.speed.SpeedZoneSync::login);
         NeoForge.EVENT_BUS.addListener(TrainObserverSpeedMonitor::onServerTick);
         NeoForge.EVENT_BUS.addListener(TrainObserverSpeedMonitor::onRightClickBlock);
-        LOGGER.info("Create: Signalling Additions 1.5.0 Alpha 1a loaded");
+        NeoForge.EVENT_BUS.addListener(com.benjamintaskis.createsignalextensions.diagnostic.GraphExportCommand::register);
+        NeoForge.EVENT_BUS.addListener(com.benjamintaskis.createsignalextensions.diagnostic.GraphExportCommand::stopped);
+        LOGGER.info("Create: Signalling Additions 1.5.0 Alpha 1 loaded");
     }
 
     public static ResourceLocation id(String path) {

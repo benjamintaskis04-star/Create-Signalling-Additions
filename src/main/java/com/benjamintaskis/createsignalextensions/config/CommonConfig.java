@@ -36,8 +36,8 @@ public final class CommonConfig {
         b.push("speed_restrictions");
         SPEED_GRAPH_DIAGNOSTICS = b.comment("Rate-limited graph association, route choice and board accept/reject diagnostics. Disabled during normal gameplay.")
                 .define("graph_diagnostics", false);
-        SPEED_DIAGNOSTICS = b.comment("Log speed-board decisions and speed-state persistence (load, restore, changes and disk save). Diagnostic build default: enabled.", "Independent of signals.signal_debug. Disable after testing to reduce log volume.")
-                .define("speed_diagnostics", true);
+        SPEED_DIAGNOSTICS = b.comment("Log speed-board decisions and speed-state persistence (load, restore, changes and disk save). Disabled by default.", "Independent of signals.signal_debug. Enable only when investigating speed restrictions; existing explicit settings are preserved.")
+                .define("speed_diagnostics", false);
         SHUNT_PROCEED_SPEED_KMH = b.comment("Maximum speed in km/h while a train is under SHUNT PROCEED authority. Cleared by an End of Shunt sign.")
                 .defineInRange("shunt_proceed_speed_kmh", 25, 1, 999);
         b.pop();

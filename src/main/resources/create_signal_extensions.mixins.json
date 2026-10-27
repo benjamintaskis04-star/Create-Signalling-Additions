@@ -4,7 +4,8 @@
   "package": "com.benjamintaskis.createsignalextensions.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "TrainSpeedMixin"
+    "TrainSpeedMixin",
+    "TrainBoundaryMixin"
   ],
   "injectors": {
     "defaultRequire": 1

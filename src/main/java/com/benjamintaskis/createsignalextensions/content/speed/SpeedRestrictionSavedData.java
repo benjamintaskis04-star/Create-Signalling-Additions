@@ -24,7 +24,12 @@ public final class SpeedRestrictionSavedData extends SavedData {
     private static final Factory<SpeedRestrictionSavedData> FACTORY =
             new Factory<>(SpeedRestrictionSavedData::new, SpeedRestrictionSavedData::load, null);
     public record Boundary(String key, Integer limitKmh, BlockPos signPos, String dimension,
-                           boolean clearsRoute, long routeSerial, Vec3 target, Vec3 forward) {}
+                           boolean clearsRoute, long routeSerial, Vec3 target, Vec3 forward, SpeedBoundaryAnchor anchor) {
+        public Boundary(String key, Integer limitKmh, BlockPos signPos, String dimension,
+                        boolean clearsRoute, long routeSerial, Vec3 target, Vec3 forward) {
+            this(key, limitKmh, signPos, dimension, clearsRoute, routeSerial, target, forward, null);
+        }
+    }
     public record Entry(Integer postedLimit, Integer routeLimit, boolean shuntAuthority,
                         long routeSerial, List<Boundary> boundaries) {}
     private final Map<UUID, Entry> entries = new HashMap<>();
@@ -89,7 +94,8 @@ public final class SpeedRestrictionSavedData extends SavedData {
                 boundaries.add(new Boundary(b.getString("Key"),
                         boundaryLimit,
                         BlockPos.of(b.getLong("Position")), dimension,
-                        b.getBoolean("ClearsRoute"), b.getLong("RouteSerial"), readVector(b, "Target"), readVector(b, "Forward")));
+                        b.getBoolean("ClearsRoute"), b.getLong("RouteSerial"), readVector(b, "Target"), readVector(b, "Forward"),
+                        b.contains("GraphAnchor", Tag.TAG_COMPOUND) ? SpeedBoundaryAnchor.read(b.getCompound("GraphAnchor")) : null));
             }
             data.entries.put(item.getUUID("Id"), new Entry(posted, route,
                     item.getBoolean("ShuntAuthority"), item.getLong("RouteSerial"), List.copyOf(boundaries)));
@@ -124,6 +130,7 @@ public final class SpeedRestrictionSavedData extends SavedData {
                 b.putLong("RouteSerial", boundary.routeSerial());
                 writeVector(b, "Target", boundary.target());
                 writeVector(b, "Forward", boundary.forward());
+                if (boundary.anchor() != null) b.put("GraphAnchor", boundary.anchor().write());
                 pending.add(b);
             }
             item.put("PendingBoundaries", pending);

@@ -125,8 +125,10 @@ tasks.named('classes') {
 
 tasks.named('jar') {
     dependsOn safeProcessResources
-    // Keep the corrective test artifact distinct while retaining the internal Alpha 1b version.
-    archiveClassifier = 'graph-association-test'
+    // Consolidated Alpha 1 artifact; prior corrective builds remain in dist/.
+    archiveClassifier = ''
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
 }
 
 // Small deterministic regression checks run without starting Minecraft.
@@ -179,3 +181,30 @@ def graphAssociationChecks = tasks.register('graphAssociationChecks', JavaExec) 
     javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
 }
 tasks.named('check') { dependsOn graphAssociationChecks }
+
+def boundaryLifecycleChecks = tasks.register('boundaryLifecycleChecks', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.benjamintaskis.createsignalextensions.content.speed.BoundaryLifecycleChecks'
+    if (project.hasProperty('boundaryScenario')) args project.property('boundaryScenario')
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+}
+tasks.named('check') { dependsOn boundaryLifecycleChecks }
+
+def graphExporterChecks = tasks.register('graphExporterChecks', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.benjamintaskis.createsignalextensions.diagnostic.GraphExporterChecks'
+    systemProperty 'java.awt.headless', 'true'
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+}
+tasks.named('check') { dependsOn graphExporterChecks }
+
+def elevationLabelChecks = tasks.register('elevationLabelChecks', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.benjamintaskis.createsignalextensions.diagnostic.GraphElevationLabelChecks'
+    systemProperty 'java.awt.headless', 'true'
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+}
+tasks.named('check') { dependsOn elevationLabelChecks }
